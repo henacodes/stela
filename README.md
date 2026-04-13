@@ -7,13 +7,13 @@ Stela is a desktop reader for PDF and EPUB books.
 ### Linux
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/master/scripts/install.sh)
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/henacodes/stela/master/scripts/install.ps1 | iex
 ```
 
 Optional: install a specific release tag.
@@ -21,13 +21,13 @@ Optional: install a specific release tag.
 Linux:
 
 ```bash
-TAG=v0.1.0 bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.sh)
+TAG=v0.1.0 bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/master/scripts/install.sh)
 ```
 
 Windows:
 
 ```powershell
-$env:TAG="v0.1.0"; iwr -useb https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.ps1 | iex
+$env:TAG="v0.1.0"; iwr -useb https://raw.githubusercontent.com/henacodes/stela/master/scripts/install.ps1 | iex
 ```
 
 ## Build from source
