@@ -1,0 +1,82 @@
+name: Build release binaries
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Flet CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet-cli
+
+      - name: Build Linux bundle
+        run: flet build linux -v
+
+      - name: Package Linux artifact
+        run: |
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64|amd64) ARCH_TAG="x64" ;;
+            aarch64|arm64) ARCH_TAG="arm64" ;;
+            *) ARCH_TAG="$ARCH" ;;
+          esac
+          tar -C build/linux -czf "stela-linux-${ARCH_TAG}.tar.gz" .
+
+      - name: Upload Linux asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: stela-linux-*.tar.gz
+          generate_release_notes: true
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Flet CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet-cli
+
+      - name: Build Windows bundle
+        run: flet build windows -v
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          if (Test-Path "build/windows") {
+            Compress-Archive -Path "build/windows/*" -DestinationPath "stela-windows-$arch.zip" -Force
+          } elseif (Test-Path "dist/windows") {
+            Compress-Archive -Path "dist/windows/*" -DestinationPath "stela-windows-$arch.zip" -Force
+          } else {
+            throw "Windows build output not found"
+          }
+
+      - name: Upload Windows asset to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: stela-windows-*.zip
+          generate_release_notes: true

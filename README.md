@@ -76,6 +76,64 @@ Yes, this is now designed to be installer-driven (no end-user scripts required).
 
 Use [scripts/release_build.sh](scripts/release_build.sh):
 
+### Easiest Linux flow (2 commands)
+
+```bash
+./scripts/release_build.sh linux-quick
+stela
+```
+
+`linux-quick` builds, installs to `~/.local/opt/stela`, registers Open With for PDF/EPUB, and creates `~/.local/bin/stela`.
+
+## One-command end-user install (from GitHub release)
+
+Linux:
+
+```bash
+./scripts/install.sh
+```
+
+Optional specific tag:
+
+```bash
+TAG=v0.1.0 ./scripts/install.sh
+```
+
+This downloads a Linux release asset from GitHub, installs under `~/.local/opt/stela`, creates `~/.local/bin/stela`, configures desktop entry, and registers PDF/EPUB Open With associations.
+
+Windows (PowerShell):
+
+```powershell
+./scripts/install.ps1
+```
+
+Optional specific tag:
+
+```powershell
+./scripts/install.ps1 -Tag v0.1.0
+```
+
+This downloads a Windows release asset from GitHub, installs to `%LOCALAPPDATA%\Stela`, updates user `PATH`, registers Open With associations for PDF/EPUB, and configures open command forwarding.
+
+Default repo for install scripts is `henacodes/stela`.
+
+## GitHub release automation (tag push)
+
+Workflow: [.github/workflows/release-build.yml](.github/workflows/release-build.yml)
+
+- Trigger: push any git tag
+- Builds Linux and Windows binaries
+- Uploads release assets:
+	- `stela-linux-*.tar.gz`
+	- `stela-windows-*.zip`
+
+Example:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ```bash
 ./scripts/release_build.sh linux
 ```
@@ -91,6 +149,7 @@ Use [scripts/release_build.sh](scripts/release_build.sh):
 This runs platform builds and (for Windows) attempts installer generation via Inno Setup if `iscc` is installed.
 
 Bundled assets are included in project:
+
 - Linux desktop entry: [packaging/linux/stela.desktop](packaging/linux/stela.desktop)
 - Linux package maintainer hooks: [packaging/linux/debian/postinst](packaging/linux/debian/postinst), [packaging/linux/debian/postrm](packaging/linux/debian/postrm)
 - Windows installer script: [packaging/windows/stela.iss](packaging/windows/stela.iss)
