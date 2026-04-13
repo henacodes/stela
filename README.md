@@ -1,175 +1,83 @@
-# Stela app
+# Stela
 
-## Run the app
+Stela is a desktop reader for PDF and EPUB books.
 
-### uv
+## Installation
 
-Run as a desktop app:
+### Linux
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.sh)
+```
+
+### Windows (PowerShell)
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.ps1 | iex
+```
+
+Optional: install a specific release tag.
+
+Linux:
+
+```bash
+TAG=v0.1.0 bash <(curl -fsSL https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.sh)
+```
+
+Windows:
+
+```powershell
+$env:TAG="v0.1.0"; iwr -useb https://raw.githubusercontent.com/henacodes/stela/main/scripts/install.ps1 | iex
+```
+
+## Build from source
+
+### Prerequisites
+
+- Python 3.10+
+- Flet CLI
+
+### Run locally
 
 ```bash
 uv run flet run
 ```
 
-Run as a web app:
-
-```bash
-uv run flet run --web
-```
-
-For more details on running the app, refer to the [Getting Started Guide](https://flet.dev/docs/).
-
-## Build the app
-
-### Android
-
-```bash
-flet build apk -v
-```
-
-For more details on building and signing `.apk` or `.aab`, refer to the [Android Packaging Guide](https://flet.dev/docs/publish/android/).
-
-### iOS
-
-```bash
-flet build ipa -v
-```
-
-For more details on building and signing `.ipa`, refer to the [iOS Packaging Guide](https://flet.dev/docs/publish/ios/).
-
-### macOS
-
-```bash
-flet build macos -v
-```
-
-For more details on building macOS package, refer to the [macOS Packaging Guide](https://flet.dev/docs/publish/macos/).
-
-### Linux
-
-```bash
-flet build linux -v
-```
-
-For more details on building Linux package, refer to the [Linux Packaging Guide](https://flet.dev/docs/publish/linux/).
-
-### Windows
-
-```bash
-flet build windows -v
-```
-
-For more details on building Windows package, refer to the [Windows Packaging Guide](https://flet.dev/docs/publish/windows/).
-
-### Web
-
-```bash
-flet build web -v
-```
-
-For more details on building Web app, refer to the [Web Packaging Guide](https://flet.dev/docs/publish/web/).
-
-## File associations (Open With)
-
-Yes, this is now designed to be installer-driven (no end-user scripts required).
-
-## One-command release build
-
-Use [scripts/release_build.sh](scripts/release_build.sh):
-
-### Easiest Linux flow (2 commands)
-
-```bash
-./scripts/release_build.sh linux-quick
-stela
-```
-
-`linux-quick` builds, installs to `~/.local/opt/stela`, registers Open With for PDF/EPUB, and creates `~/.local/bin/stela`.
-
-## One-command end-user install (from GitHub release)
+### Build desktop packages
 
 Linux:
 
 ```bash
-./scripts/install.sh
+./scripts/release_build.sh linux
 ```
 
-Optional specific tag:
+Windows:
 
 ```bash
-TAG=v0.1.0 ./scripts/install.sh
+./scripts/release_build.sh windows
 ```
 
-This downloads a Linux release asset from GitHub, installs under `~/.local/opt/stela`, creates `~/.local/bin/stela`, configures desktop entry, and registers PDF/EPUB Open With associations.
+Both:
 
-Windows (PowerShell):
-
-```powershell
-./scripts/install.ps1
+```bash
+./scripts/release_build.sh all
 ```
 
-Optional specific tag:
+## Release flow
 
-```powershell
-./scripts/install.ps1 -Tag v0.1.0
-```
-
-This downloads a Windows release asset from GitHub, installs to `%LOCALAPPDATA%\Stela`, updates user `PATH`, registers Open With associations for PDF/EPUB, and configures open command forwarding.
-
-Default repo for install scripts is `henacodes/stela`.
-
-## GitHub release automation (tag push)
-
-Workflow: [.github/workflows/release-build.yml](.github/workflows/release-build.yml)
-
-- Trigger: push any git tag
-- Builds Linux and Windows binaries
-- Uploads release assets:
-	- `stela-linux-*.tar.gz`
-	- `stela-windows-*.zip`
-
-Example:
+Release binaries are built by GitHub Actions on tag push using [/.github/workflows/release-build.yml](.github/workflows/release-build.yml).
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-```bash
-./scripts/release_build.sh linux
-```
+## Contributing
 
-```bash
-./scripts/release_build.sh windows
-```
+1. Fork the repository.
+2. Create a feature branch.
+3. Make your changes.
+4. Run the app and verify behavior.
+5. Open a pull request.
 
-```bash
-./scripts/release_build.sh all
-```
-
-This runs platform builds and (for Windows) attempts installer generation via Inno Setup if `iscc` is installed.
-
-Bundled assets are included in project:
-
-- Linux desktop entry: [packaging/linux/stela.desktop](packaging/linux/stela.desktop)
-- Linux package maintainer hooks: [packaging/linux/debian/postinst](packaging/linux/debian/postinst), [packaging/linux/debian/postrm](packaging/linux/debian/postrm)
-- Windows installer script: [packaging/windows/stela.iss](packaging/windows/stela.iss)
-- Windows registry fallback template: [packaging/windows/register_associations.reg](packaging/windows/register_associations.reg)
-
-### Linux
-
-- Ship the `.desktop` file in the package under `/usr/share/applications/`.
-- `postinst`/`postrm` refresh desktop+MIME caches during install/remove.
-- End users should only install/uninstall the package.
-
-Optional dev-only helper remains available at [packaging/linux/register_associations.sh](packaging/linux/register_associations.sh).
-
-### Windows
-
-- Use [packaging/windows/stela.iss](packaging/windows/stela.iss) to create an installer that writes Open With registry entries during install.
-- End users just run the installer.
-
-Fallback/manual method is kept in [packaging/windows/register_associations.reg](packaging/windows/register_associations.reg).
-
-### Runtime behavior
-
-When the OS opens a `.pdf` or `.epub` with Stela, the passed file path is now accepted at startup, imported/updated in the local DB, and opened directly in the reader.
+If your change affects build/install, update [README.md](README.md) and relevant scripts under [scripts](scripts).
