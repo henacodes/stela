@@ -124,6 +124,7 @@ def ReaderView():
     epub_text_align, set_epub_text_align = ft.use_state(parse_text_align(reader_session.get("epub_text_align", "left")))
     toc_width = 320.0
     is_pdf = bool(state.selected_book and state.selected_book.lower().endswith(".pdf"))
+    is_dark_mode = state.theme_mode == ft.ThemeMode.DARK
     effective_is_vertical = is_vertical if is_pdf else False
     
     # Debugging: Check if the path is reaching the view
@@ -415,6 +416,19 @@ def ReaderView():
                 return None
             page = doc.load_page(page_index)
             pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+
+            if is_dark_mode:
+                try:
+                    # Dark reader palette: avoid pure black/white for eye comfort.
+                    pix.invert_irect(pix.irect)
+                    pix.tint_with(0x1F2937, 0xD1D5DB)
+                except Exception:
+                    # Fallback to plain inversion if tinting is not available.
+                    try:
+                        pix.invert_irect(pix.irect)
+                    except Exception:
+                        pass
+
             encoded = base64.b64encode(pix.tobytes("png")).decode("utf-8")
             return f"data:image/png;base64,{encoded}"
         except Exception as e:
