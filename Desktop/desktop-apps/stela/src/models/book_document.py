@@ -222,6 +222,7 @@ class BookDocument:
                 publisher = md_elem.find(f"{{{dc_ns}}}publisher")
                 identifier = md_elem.find(f"{{{dc_ns}}}identifier")
                 description = md_elem.find(f"{{{dc_ns}}}description")
+                date = md_elem.find(f"{{{dc_ns}}}date")
 
                 metadata.title = "".join(title.itertext()).strip() if title is not None else ""
                 metadata.author = "".join(creator.itertext()).strip() if creator is not None else ""
@@ -229,6 +230,7 @@ class BookDocument:
                 metadata.publisher = "".join(publisher.itertext()).strip() if publisher is not None else ""
                 metadata.identifier = "".join(identifier.itertext()).strip() if identifier is not None else ""
                 metadata.description = "".join(description.itertext()).strip() if description is not None else ""
+                metadata.created_at = "".join(date.itertext()).strip() if date is not None else ""
 
             manifest: dict[str, dict[str, str]] = {}
             for item in opf_root.findall(f".//{opf_tag('manifest')}/{opf_tag('item')}"):

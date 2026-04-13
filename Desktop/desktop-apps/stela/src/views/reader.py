@@ -17,6 +17,42 @@ from components.epub_reader import EpubReader, EpubRenderableSection
 from components.epub_controls import EpubControls
 
 
+def _as_float(value: object, default: float) -> float:
+    try:
+        if isinstance(value, (int, float, str)):
+            return float(value)
+        return default
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value: object, default: int) -> int:
+    try:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            return int(float(value))
+        return default
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_bool(value: object, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 @dataclass
 class EpubSection:
     title: str
@@ -61,13 +97,31 @@ class EpubTextExtractor(HTMLParser):
 @ft.component
 def ReaderView():
     state = ft.use_context(AppContext)
-    current_page, set_current_page = ft.use_state(0)
-    zoom, set_zoom = ft.use_state(1.0)
-    is_vertical, set_is_vertical = ft.use_state(True)
-    show_toc, set_show_toc = ft.use_state(True)
-    epub_font_size, set_epub_font_size = ft.use_state(16)
-    epub_line_height, set_epub_line_height = ft.use_state(1.6)
-    epub_text_align, set_epub_text_align = ft.use_state(ft.TextAlign.LEFT)
+    reader_session = ft.use_memo(
+        lambda: state.get_reader_session(),
+        [state.selected_book],
+    )
+
+    def parse_text_align(value: object) -> ft.TextAlign:
+        raw = str(value or "left").lower()
+        if raw == "center":
+            return ft.TextAlign.CENTER
+        if raw == "justify":
+            return ft.TextAlign.JUSTIFY
+        return ft.TextAlign.LEFT
+
+    initial_position = ft.use_memo(
+        lambda: state.get_last_position(state.selected_book),
+        [state.selected_book],
+    )
+    current_page, set_current_page = ft.use_state(initial_position)
+    pending_jump_target, set_pending_jump_target = ft.use_state(-1)
+    zoom, set_zoom = ft.use_state(_as_float(reader_session.get("pdf_zoom"), 1.0))
+    is_vertical, set_is_vertical = ft.use_state(_as_bool(reader_session.get("pdf_is_vertical"), True))
+    show_toc, set_show_toc = ft.use_state(_as_bool(reader_session.get("pdf_show_toc"), True))
+    epub_font_size, set_epub_font_size = ft.use_state(_as_int(reader_session.get("epub_font_size"), 16))
+    epub_line_height, set_epub_line_height = ft.use_state(_as_float(reader_session.get("epub_line_height"), 1.6))
+    epub_text_align, set_epub_text_align = ft.use_state(parse_text_align(reader_session.get("epub_text_align", "left")))
     toc_width = 320.0
     is_pdf = bool(state.selected_book and state.selected_book.lower().endswith(".pdf"))
     effective_is_vertical = is_vertical if is_pdf else False
@@ -280,30 +334,37 @@ def ReaderView():
     )
 
     def reset_reader_state():
-        set_current_page(0)
-        set_zoom(1.0)
-        set_is_vertical(True)
-        set_epub_font_size(16)
-        set_epub_line_height(1.6)
-        set_epub_text_align(ft.TextAlign.LEFT)
+        saved_position = state.get_last_position(state.selected_book)
+        session = state.get_reader_session()
+        set_current_page(saved_position)
+        set_zoom(_as_float(session.get("pdf_zoom"), 1.0))
+        set_is_vertical(_as_bool(session.get("pdf_is_vertical"), True))
+        set_show_toc(_as_bool(session.get("pdf_show_toc"), True))
+        set_pending_jump_target(saved_position if is_pdf else -1)
+        set_epub_font_size(_as_int(session.get("epub_font_size"), 16))
+        set_epub_line_height(_as_float(session.get("epub_line_height"), 1.6))
+        set_epub_text_align(parse_text_align(session.get("epub_text_align", "left")))
 
     ft.on_updated(reset_reader_state, [state.selected_book])
     
     if is_pdf and not doc:
-        return ft.Container(
-            content=ft.Text("No book selected or file error", color="red"),
-            alignment=ft.Alignment(0, 0),
-            expand=True
-        )
+        return ft.Text(value="No book selected or file error", color="red")
 
     if not is_pdf and not epub_sections:
-        return ft.Container(
-            content=ft.Text("No readable EPUB sections found", color="red"),
-            alignment=ft.Alignment(0, 0),
-            expand=True,
-        )
+        return ft.Text(value="No readable EPUB sections found", color="red")
 
     page_count = len(doc) if is_pdf and doc else len(epub_sections)
+
+    def clamp_current_page_to_book_bounds():
+        if page_count <= 0:
+            return
+        if current_page < 0:
+            set_current_page(0)
+            return
+        if current_page >= page_count:
+            set_current_page(page_count - 1)
+
+    ft.on_updated(clamp_current_page_to_book_bounds, [page_count, state.selected_book])
 
     def get_toc_entries() -> list[tuple[int, str, int]]:
         if not is_pdf:
@@ -337,9 +398,7 @@ def ReaderView():
     def calculate_max_zoom(with_toc: bool) -> float:
         if not is_pdf:
             return 2.5
-        viewport_width = float(ft.context.page.width or 1280)
-        reserved_width = 80.0 + (toc_width if with_toc and len(toc_entries) > 0 else 0.0)
-        return max(0.5, min(5.0, (viewport_width - reserved_width) / max(1.0, base_page_width)))
+        return 5.0
 
     max_zoom = calculate_max_zoom(show_toc)
 
@@ -374,6 +433,8 @@ def ReaderView():
         next_show_toc = not show_toc
         set_show_toc(next_show_toc)
         set_zoom(min(zoom, round(calculate_max_zoom(next_show_toc), 2)))
+        if is_pdf and effective_is_vertical:
+            set_pending_jump_target(current_page)
 
     def on_toggle_reading_mode(_: ft.Event[ft.IconButton]):
         set_is_vertical(not is_vertical)
@@ -389,7 +450,33 @@ def ReaderView():
         if 0 <= page_index < page_count:
             set_current_page(page_index)
             if is_pdf and effective_is_vertical:
-                set_is_vertical(False)
+                set_pending_jump_target(page_index)
+
+    def persist_reader_position():
+        state.save_last_position(current_page)
+
+    ft.on_updated(persist_reader_position, [current_page, state.selected_book])
+
+    def persist_reader_session():
+        align_label = "left"
+        if epub_text_align == ft.TextAlign.CENTER:
+            align_label = "center"
+        elif epub_text_align == ft.TextAlign.JUSTIFY:
+            align_label = "justify"
+
+        state.save_reader_session(
+            pdf_zoom=zoom,
+            pdf_is_vertical=is_vertical,
+            pdf_show_toc=show_toc,
+            epub_font_size=epub_font_size,
+            epub_line_height=epub_line_height,
+            epub_text_align=align_label,
+        )
+
+    ft.on_updated(
+        persist_reader_session,
+        [zoom, is_vertical, show_toc, epub_font_size, epub_line_height, epub_text_align, state.selected_book],
+    )
 
     rendered_page_width = max(1.0, base_page_width * zoom) if is_pdf else 0.0
     rendered_page_height = max(1.0, base_page_height * zoom) if is_pdf else 0.0
@@ -413,10 +500,7 @@ def ReaderView():
             )
         )
         body_controls.append(
-            ft.Container(
-                width=1,
-                bgcolor=ft.Colors.OUTLINE_VARIANT,
-            )
+            ft.VerticalDivider(width=1)
         )
 
     if is_pdf:
@@ -429,9 +513,11 @@ def ReaderView():
                 rendered_page_height=rendered_page_height,
                 page_item_extent=page_item_extent,
                 visible_indices=visible_indices,
+                jump_target_page=pending_jump_target if pending_jump_target >= 0 else None,
                 current_src=current_src,
                 get_page_base64=get_page_base64,
                 on_visible_page_change=set_current_page,
+                on_jump_handled=lambda: set_pending_jump_target(-1),
             )
         )
     else:
