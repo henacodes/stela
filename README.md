@@ -67,3 +67,50 @@ flet build web -v
 ```
 
 For more details on building Web app, refer to the [Web Packaging Guide](https://flet.dev/docs/publish/web/).
+
+## File associations (Open With)
+
+Yes, this is now designed to be installer-driven (no end-user scripts required).
+
+## One-command release build
+
+Use [scripts/release_build.sh](scripts/release_build.sh):
+
+```bash
+./scripts/release_build.sh linux
+```
+
+```bash
+./scripts/release_build.sh windows
+```
+
+```bash
+./scripts/release_build.sh all
+```
+
+This runs platform builds and (for Windows) attempts installer generation via Inno Setup if `iscc` is installed.
+
+Bundled assets are included in project:
+- Linux desktop entry: [packaging/linux/stela.desktop](packaging/linux/stela.desktop)
+- Linux package maintainer hooks: [packaging/linux/debian/postinst](packaging/linux/debian/postinst), [packaging/linux/debian/postrm](packaging/linux/debian/postrm)
+- Windows installer script: [packaging/windows/stela.iss](packaging/windows/stela.iss)
+- Windows registry fallback template: [packaging/windows/register_associations.reg](packaging/windows/register_associations.reg)
+
+### Linux
+
+- Ship the `.desktop` file in the package under `/usr/share/applications/`.
+- `postinst`/`postrm` refresh desktop+MIME caches during install/remove.
+- End users should only install/uninstall the package.
+
+Optional dev-only helper remains available at [packaging/linux/register_associations.sh](packaging/linux/register_associations.sh).
+
+### Windows
+
+- Use [packaging/windows/stela.iss](packaging/windows/stela.iss) to create an installer that writes Open With registry entries during install.
+- End users just run the installer.
+
+Fallback/manual method is kept in [packaging/windows/register_associations.reg](packaging/windows/register_associations.reg).
+
+### Runtime behavior
+
+When the OS opens a `.pdf` or `.epub` with Stela, the passed file path is now accepted at startup, imported/updated in the local DB, and opened directly in the reader.

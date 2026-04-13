@@ -6,7 +6,7 @@ from models.library_book import LibraryBook
 
 
 @ft.component
-def LibraryBookCard(book: LibraryBook, on_open):
+def LibraryBookCard(book: LibraryBook, on_open, on_fetch_cover):
     format_chip_color = ft.Colors.BLUE_100 if book.format == "pdf" else ft.Colors.GREEN_100
     card_width = 240
     cover_height = 220
@@ -40,6 +40,11 @@ def LibraryBookCard(book: LibraryBook, on_open):
         if inspect.isawaitable(result):
             await result
 
+    async def handle_fetch_cover(_):
+        result = on_fetch_cover(book.path)
+        if inspect.isawaitable(result):
+            await result
+
     return ft.Container(
         width=card_width,
         border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
@@ -67,6 +72,12 @@ def LibraryBookCard(book: LibraryBook, on_open):
                                         content=ft.Text(value=book.format.upper(), size=11, weight=ft.FontWeight.W_600),
                                     ),
                                 ],
+                            ),
+                            ft.Button(
+                                "Check cover image",
+                                icon=ft.Icons.IMAGE_SEARCH,
+                                visible=book.cover_path is None,
+                                on_click=handle_fetch_cover,
                             ),
                             ft.Text(
                                 value=(book.author or "Unknown author") + (f" • {book.published_year}" if book.published_year else ""),

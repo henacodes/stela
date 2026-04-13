@@ -63,6 +63,16 @@ class LibraryDB:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    theme_mode TEXT NOT NULL DEFAULT 'light',
+                    seed_color TEXT NOT NULL DEFAULT '#18181b',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             columns = {
                 str(row["name"])
                 for row in conn.execute("PRAGMA table_info(books)").fetchall()
@@ -73,7 +83,38 @@ class LibraryDB:
                 conn.execute("ALTER TABLE books ADD COLUMN last_position INTEGER NOT NULL DEFAULT 0")
             if "published_year" not in columns:
                 conn.execute("ALTER TABLE books ADD COLUMN published_year INTEGER")
+            if "pdf_is_heavy" not in columns:
+                conn.execute("ALTER TABLE books ADD COLUMN pdf_is_heavy INTEGER")
             conn.execute("INSERT OR IGNORE INTO reader_session (id) VALUES (1)")
+            conn.execute("INSERT OR IGNORE INTO app_settings (id) VALUES (1)")
+
+    def get_pdf_is_heavy(self, path: str) -> bool | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT pdf_is_heavy
+                FROM books
+                WHERE path = ?
+                """,
+                (path,),
+            ).fetchone()
+        if not row:
+            return None
+        value = row["pdf_is_heavy"]
+        if value is None:
+            return None
+        return bool(int(value))
+
+    def set_pdf_is_heavy(self, path: str, is_heavy: bool):
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE books
+                SET pdf_is_heavy = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE path = ?
+                """,
+                (1 if is_heavy else 0, path),
+            )
 
     def _extract_year(self, raw_value: str) -> int | None:
         if not raw_value:
@@ -215,6 +256,35 @@ class LibraryDB:
         except Exception:
             return False
 
+    def refresh_cover_for_book(self, path: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT path, format
+                FROM books
+                WHERE path = ?
+                """,
+                (path,),
+            ).fetchone()
+
+        if not row:
+            return False
+
+        cover_path = self._cover_store.save_cover(str(row["path"]), str(row["format"]))
+        if not cover_path:
+            return False
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE books
+                SET cover_path = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE path = ?
+                """,
+                (cover_path, path),
+            )
+        return True
+
     def get_last_position(self, path: str) -> int:
         with self._connect() as conn:
             row = conn.execute(
@@ -309,4 +379,35 @@ class LibraryDB:
             "epub_font_size": int(row["epub_font_size"]),
             "epub_line_height": float(row["epub_line_height"]),
             "epub_text_align": str(row["epub_text_align"]),
+        }
+
+    def save_app_settings(self, *, theme_mode: str, seed_color: str):
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings (id, theme_mode, seed_color, updated_at)
+                VALUES (1, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    theme_mode=excluded.theme_mode,
+                    seed_color=excluded.seed_color,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (theme_mode, seed_color),
+            )
+
+    def get_app_settings(self) -> dict[str, str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT theme_mode, seed_color
+                FROM app_settings
+                WHERE id = 1
+                """
+            ).fetchone()
+
+        if not row:
+            return {"theme_mode": "light", "seed_color": "#18181b"}
+        return {
+            "theme_mode": str(row["theme_mode"] or "light"),
+            "seed_color": str(row["seed_color"] or "#18181b"),
         }

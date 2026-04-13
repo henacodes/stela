@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
 import asyncio
+import os
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 import flet as ft
 from models.library_book import LibraryBook
 from services.library_db import LibraryDB
@@ -61,9 +64,14 @@ class AppModel:
     import_current_book: str | None = None
     opening_book_path: str | None = None
     resume_prompt_pending: bool = True
+    theme_seed_color: str = "#18181b"
 
     def __post_init__(self):
         self._library_db = LibraryDB()
+        settings = self._library_db.get_app_settings()
+        mode = _as_str(settings.get("theme_mode"), "light").lower()
+        self.theme_mode = ft.ThemeMode.DARK if mode == "dark" else ft.ThemeMode.LIGHT
+        self.theme_seed_color = _as_str(settings.get("seed_color"), "#18181b")
         self.refresh_library()
 
     def navigate(self, new_route: str):
@@ -90,6 +98,17 @@ class AppModel:
             if self.theme_mode == ft.ThemeMode.LIGHT 
             else ft.ThemeMode.LIGHT
         )
+        self.persist_app_settings()
+
+    def set_theme_seed_color(self, color: str):
+        if not color:
+            return
+        self.theme_seed_color = color
+        self.persist_app_settings()
+
+    def persist_app_settings(self):
+        mode = "dark" if self.theme_mode == ft.ThemeMode.DARK else "light"
+        self._library_db.save_app_settings(theme_mode=mode, seed_color=self.theme_seed_color)
 
     def import_book(self, path: str):
         """Imports one book and refreshes the indexed library."""
@@ -247,3 +266,48 @@ class AppModel:
 
     def consume_resume_prompt(self):
         self.resume_prompt_pending = False
+
+    def get_pdf_is_heavy(self, path: str | None) -> bool | None:
+        if not path:
+            return None
+        return self._library_db.get_pdf_is_heavy(path)
+
+    def set_pdf_is_heavy(self, path: str | None, is_heavy: bool):
+        if not path:
+            return
+        self._library_db.set_pdf_is_heavy(path, is_heavy)
+
+    def open_external_book(self, raw_path: str) -> bool:
+        if not raw_path:
+            return False
+
+        path = raw_path.strip().strip('"').strip("'")
+        if path.lower().startswith("file://"):
+            parsed = urlparse(path)
+            path = unquote(parsed.path or "")
+            if os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+                path = path[1:]
+
+        resolved = str(Path(path).expanduser())
+        suffix = Path(resolved).suffix.lower()
+        if suffix not in {".pdf", ".epub"}:
+            self.import_status = "Unsupported file type"
+            return False
+
+        if not Path(resolved).exists():
+            self.import_status = "File not found"
+            return False
+
+        ok = self._library_db.import_path(resolved)
+        if not ok:
+            self.import_status = "Could not import selected file"
+            return False
+
+        self.refresh_library()
+        self.open_book(resolved)
+        return True
+
+    async def refresh_cover_async(self, path: str):
+        ok = await asyncio.to_thread(self._library_db.refresh_cover_for_book, path)
+        self.refresh_library()
+        self.import_status = "Cover updated" if ok else "No cover found for this book"

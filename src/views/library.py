@@ -53,6 +53,11 @@ def LibraryView():
         await asyncio.sleep(0.05)
         state.open_book(path)
 
+    async def handle_fetch_cover(path: str):
+        await state.refresh_cover_async(path)
+        if ft.context.page:
+            ft.context.page.update()
+
     async def handle_resume_last_book(_):
         if not last_read_book_path:
             set_resume_modal_visible(False)
@@ -105,7 +110,7 @@ def LibraryView():
             )
         )
 
-    controls.append(LibraryGrid(books=state.library, on_open=handle_open_book))
+    controls.append(LibraryGrid(books=state.library, on_open=handle_open_book, on_fetch_cover=handle_fetch_cover))
 
     return cast(Any, ft.Stack)(
         expand=True,

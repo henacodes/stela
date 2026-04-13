@@ -1,6 +1,9 @@
 import flet as ft
 import fitz  # PyMuPDF
 import base64
+import os
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import posixpath
@@ -9,7 +12,7 @@ from urllib.parse import unquote
 import zipfile
 import xml.etree.ElementTree as ET
 from contexts.app_context import AppContext
-from typing import cast
+from typing import Any, cast
 from components.reader_toolbar import ReaderToolbar
 from components.toc_panel import TocPanel
 from components.pdf_reader import PdfReader
@@ -57,6 +60,16 @@ def _as_bool(value: object, default: bool) -> bool:
 class EpubSection:
     title: str
     content: str
+
+
+@dataclass
+class PdfComplexityProfile:
+    is_heavy: bool
+    jpeg_quality: int
+    cache_limit: int
+    prefetch_neighbors: int
+    max_zoom: float
+    reason: str = ""
 
 
 class EpubTextExtractor(HTMLParser):
@@ -116,6 +129,8 @@ def ReaderView():
     )
     current_page, set_current_page = ft.use_state(initial_position)
     pending_jump_target, set_pending_jump_target = ft.use_state(-1)
+    is_toc_jump_loading, set_is_toc_jump_loading = ft.use_state(False)
+    pdf_heavy_revision, set_pdf_heavy_revision = ft.use_state(0)
     zoom, set_zoom = ft.use_state(_as_float(reader_session.get("pdf_zoom"), 1.0))
     is_vertical, set_is_vertical = ft.use_state(_as_bool(reader_session.get("pdf_is_vertical"), True))
     show_toc, set_show_toc = ft.use_state(_as_bool(reader_session.get("pdf_show_toc"), True))
@@ -127,15 +142,32 @@ def ReaderView():
     is_dark_mode = state.theme_mode == ft.ThemeMode.DARK
     effective_is_vertical = is_vertical if is_pdf else False
     
-    # Debugging: Check if the path is reaching the view
-    if state.selected_book:
-        print(f"DEBUG: ReaderView opening: {state.selected_book}")
-
     # Memoize the PDF document so we don't reload on every render
     doc = ft.use_memo(
         lambda: fitz.open(state.selected_book) if (state.selected_book and is_pdf) else None,
         [state.selected_book, is_pdf]
     )
+    page_image_cache_ref = cast(Any, ft.use_ref(OrderedDict()))
+    last_saved_position_ref = cast(Any, ft.use_ref(initial_position))
+    last_saved_at_ref = cast(Any, ft.use_ref(0.0))
+
+    pdf_size_assumption_is_heavy = ft.use_memo(
+        lambda: bool(
+            is_pdf
+            and state.selected_book
+            and os.path.exists(state.selected_book)
+            and os.path.getsize(state.selected_book) > (5 * 1024 * 1024)
+        ),
+        [state.selected_book, is_pdf],
+    )
+    saved_pdf_is_heavy = ft.use_memo(
+        lambda: state.get_pdf_is_heavy(state.selected_book) if is_pdf else None,
+        [state.selected_book, is_pdf, pdf_heavy_revision],
+    )
+    effective_pdf_is_heavy = (
+        saved_pdf_is_heavy if saved_pdf_is_heavy is not None else pdf_size_assumption_is_heavy
+    )
+    needs_pdf_heavy_prompt = bool(is_pdf and state.selected_book and saved_pdf_is_heavy is None)
 
     def normalize_href(href: str) -> str:
         base = unquote(href.split("#", 1)[0]).strip()
@@ -334,6 +366,15 @@ def ReaderView():
         [state.selected_book, is_pdf],
     )
 
+    pdf_profile = PdfComplexityProfile(
+        is_heavy=bool(effective_pdf_is_heavy),
+        jpeg_quality=66 if effective_pdf_is_heavy else 78,
+        cache_limit=6 if effective_pdf_is_heavy else 14,
+        prefetch_neighbors=0 if effective_pdf_is_heavy else 2,
+        max_zoom=3.0 if effective_pdf_is_heavy else 5.0,
+        reason="saved" if saved_pdf_is_heavy is not None else "size-threshold",
+    )
+
     def reset_reader_state():
         saved_position = state.get_last_position(state.selected_book)
         session = state.get_reader_session()
@@ -342,9 +383,13 @@ def ReaderView():
         set_is_vertical(_as_bool(session.get("pdf_is_vertical"), True))
         set_show_toc(_as_bool(session.get("pdf_show_toc"), True))
         set_pending_jump_target(saved_position if is_pdf else -1)
+        set_is_toc_jump_loading(False)
         set_epub_font_size(_as_int(session.get("epub_font_size"), 16))
         set_epub_line_height(_as_float(session.get("epub_line_height"), 1.6))
         set_epub_text_align(parse_text_align(session.get("epub_text_align", "left")))
+        page_image_cache_ref.current = OrderedDict()
+        last_saved_position_ref.current = saved_position
+        last_saved_at_ref.current = 0.0
 
     ft.on_updated(reset_reader_state, [state.selected_book])
     
@@ -399,7 +444,7 @@ def ReaderView():
     def calculate_max_zoom(with_toc: bool) -> float:
         if not is_pdf:
             return 2.5
-        return 5.0
+        return pdf_profile.max_zoom
 
     max_zoom = calculate_max_zoom(show_toc)
 
@@ -414,8 +459,20 @@ def ReaderView():
         try:
             if not doc:
                 return None
+            cache_key = (
+                page_index,
+                int(round(zoom * 100)),
+                bool(is_dark_mode),
+                bool(state.selected_book and state.selected_book.lower().endswith(".pdf")),
+                int(pdf_profile.jpeg_quality),
+            )
+            cached = page_image_cache_ref.current.get(cache_key)
+            if cached is not None:
+                page_image_cache_ref.current.move_to_end(cache_key)
+                return cached
+
             page = doc.load_page(page_index)
-            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
 
             if is_dark_mode:
                 try:
@@ -429,19 +486,31 @@ def ReaderView():
                     except Exception:
                         pass
 
-            encoded = base64.b64encode(pix.tobytes("png")).decode("utf-8")
-            return f"data:image/png;base64,{encoded}"
+            encoded = base64.b64encode(
+                pix.tobytes("jpeg", jpg_quality=pdf_profile.jpeg_quality)
+            ).decode("utf-8")
+            result = f"data:image/jpeg;base64,{encoded}"
+            page_image_cache_ref.current[cache_key] = result
+            while len(page_image_cache_ref.current) > pdf_profile.cache_limit:
+                page_image_cache_ref.current.popitem(last=False)
+            return result
         except Exception as e:
             print(f"Error rendering page {page_index}: {e}")
             return None
 
     def on_prev_page(_: ft.Event[ft.IconButton]):
         if current_page > 0:
-            set_current_page(current_page - 1)
+            next_page = current_page - 1
+            set_current_page(next_page)
+            if is_pdf and effective_is_vertical:
+                set_pending_jump_target(next_page)
 
     def on_next_page(_: ft.Event[ft.IconButton]):
         if current_page < page_count - 1:
-            set_current_page(current_page + 1)
+            next_page = current_page + 1
+            set_current_page(next_page)
+            if is_pdf and effective_is_vertical:
+                set_pending_jump_target(next_page)
 
     def on_toggle_toc(_: ft.Event[ft.IconButton]):
         next_show_toc = not show_toc
@@ -462,12 +531,48 @@ def ReaderView():
 
     def on_jump_to_page(page_index: int):
         if 0 <= page_index < page_count:
-            set_current_page(page_index)
             if is_pdf and effective_is_vertical:
+                set_is_toc_jump_loading(True)
                 set_pending_jump_target(page_index)
+                return
+            set_current_page(page_index)
+
+    def save_pdf_heavy_answer(is_assumption_correct: bool):
+        if not state.selected_book or not is_pdf:
+            return
+        final_is_heavy = (
+            pdf_size_assumption_is_heavy
+            if is_assumption_correct
+            else (not pdf_size_assumption_is_heavy)
+        )
+        state.set_pdf_is_heavy(state.selected_book, final_is_heavy)
+        set_pdf_heavy_revision(pdf_heavy_revision + 1)
+        page_image_cache_ref.current = OrderedDict()
+
+    def on_pdf_heavy_yes(_):
+        save_pdf_heavy_answer(True)
+
+    def on_pdf_heavy_no(_):
+        save_pdf_heavy_answer(False)
+
+    def on_pdf_heavy_idk(_):
+        save_pdf_heavy_answer(True)
 
     def persist_reader_position():
-        state.save_last_position(current_page)
+        if not is_pdf:
+            state.save_last_position(current_page)
+            return
+
+        now = time.monotonic()
+        should_save = (
+            current_page == 0
+            or abs(current_page - last_saved_position_ref.current) >= 2
+            or (now - last_saved_at_ref.current) >= 1.2
+        )
+        if should_save:
+            state.save_last_position(current_page)
+            last_saved_position_ref.current = current_page
+            last_saved_at_ref.current = now
 
     ft.on_updated(persist_reader_position, [current_page, state.selected_book])
 
@@ -495,14 +600,23 @@ def ReaderView():
     rendered_page_width = max(1.0, base_page_width * zoom) if is_pdf else 0.0
     rendered_page_height = max(1.0, base_page_height * zoom) if is_pdf else 0.0
     page_item_extent = int(rendered_page_height + 12)
-    visible_indices = range(max(0, current_page - 2), min(page_count, current_page + 3))
+    render_page_indices: list[int] = []
+    if is_pdf:
+        neighbor = pdf_profile.prefetch_neighbors if effective_is_vertical else 0
+        start = max(0, current_page - neighbor)
+        end = min(page_count - 1, current_page + neighbor)
+        render_page_indices = list(range(start, end + 1))
 
     current_src = ft.use_memo(
         lambda: get_page_base64(current_page) or "",
-        [current_page, zoom, state.selected_book, is_pdf],
+        [current_page, zoom, state.selected_book, is_pdf, pdf_profile.jpeg_quality],
     )
 
     body_controls = cast(list[ft.Control], [])
+
+    def handle_jump_handled():
+        set_pending_jump_target(-1)
+        set_is_toc_jump_loading(False)
 
     if show_toc and len(toc_entries) > 0:
         body_controls.append(
@@ -526,12 +640,12 @@ def ReaderView():
                 rendered_page_width=rendered_page_width,
                 rendered_page_height=rendered_page_height,
                 page_item_extent=page_item_extent,
-                visible_indices=visible_indices,
                 jump_target_page=pending_jump_target if pending_jump_target >= 0 else None,
+                render_page_indices=render_page_indices,
                 current_src=current_src,
                 get_page_base64=get_page_base64,
                 on_visible_page_change=set_current_page,
-                on_jump_handled=lambda: set_pending_jump_target(-1),
+                on_jump_handled=handle_jump_handled,
             )
         )
     else:
@@ -586,10 +700,80 @@ def ReaderView():
                 on_line_height_change=on_epub_line_height_change,
                 on_text_align_change=on_epub_text_align_change,
             ) if not is_pdf else ft.Container(),
-            ft.Row(
+            cast(Any, ft.Stack)(
                 expand=True,
-                spacing=0,
-                controls=body_controls,
+                controls=cast(list[ft.Control], [
+                    ft.Row(
+                        expand=True,
+                        spacing=0,
+                        controls=body_controls,
+                    ),
+                    cast(Any, ft.Container)(
+                        visible=bool(is_pdf and effective_is_vertical and is_toc_jump_loading),
+                        alignment=ft.Alignment(1, 1),
+                        padding=ft.padding.only(right=16, bottom=16),
+                        content=cast(Any, ft.Container)(
+                            padding=10,
+                            border_radius=999,
+                            bgcolor=ft.Colors.with_opacity(0.7, ft.Colors.SURFACE_CONTAINER_HIGHEST),
+                            content=ft.ProgressRing(width=18, height=18, stroke_width=2),
+                        ),
+                    ),
+                    cast(Any, ft.Container)(
+                        left=0,
+                        right=0,
+                        top=0,
+                        bottom=0,
+                        visible=bool(needs_pdf_heavy_prompt and is_pdf),
+                        bgcolor=ft.Colors.with_opacity(0.42, ft.Colors.BLACK),
+                        content=cast(Any, ft.Row)(
+                            expand=True,
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=cast(list[ft.Control], [
+                                cast(Any, ft.Container)(
+                                    width=500,
+                                    padding=20,
+                                    border_radius=12,
+                                    bgcolor=ft.Colors.SURFACE,
+                                    content=cast(Any, ft.Column)(
+                                        tight=True,
+                                        spacing=12,
+                                        controls=cast(list[ft.Control], [
+                                            ft.Text(value="PDF performance profile", size=18, weight=ft.FontWeight.BOLD),
+                                            ft.Text(
+                                                value=(
+                                                    "This PDF is "
+                                                    + ("over" if pdf_size_assumption_is_heavy else "under")
+                                                    + " 5 MB, so it was assumed to be "
+                                                    + ("heavy" if pdf_size_assumption_is_heavy else "light")
+                                                    + ". Is this assumption correct?"
+                                                ),
+                                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                            ),
+                                            ft.Text(
+                                                value=(
+                                                    "Heavy means scanned/image-dense PDFs where page rendering and TOC jumps "
+                                                    "can be slower, so we use a more conservative rendering strategy."
+                                                ),
+                                                size=12,
+                                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                            ),
+                                            cast(Any, ft.Row)(
+                                                alignment=ft.MainAxisAlignment.END,
+                                                controls=cast(list[ft.Control], [
+                                                    ft.OutlinedButton("No", on_click=on_pdf_heavy_no),
+                                                    ft.OutlinedButton("IDK", on_click=on_pdf_heavy_idk),
+                                                    ft.Button("Yes", on_click=on_pdf_heavy_yes),
+                                                ]),
+                                            ),
+                                        ]),
+                                    ),
+                                ),
+                            ]),
+                        ),
+                    ),
+                ]),
             ),
         ])
     )

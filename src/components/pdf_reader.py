@@ -11,13 +11,15 @@ def PdfReader(
     rendered_page_width: float,
     rendered_page_height: float,
     page_item_extent: int,
-    visible_indices: range,
     jump_target_page: int | None,
+    render_page_indices: list[int],
     current_src: str,
     get_page_base64: Callable[[int], str | None],
     on_visible_page_change: Callable[[int], None],
     on_jump_handled: Callable[[], None],
 ):
+    render_set = set(render_page_indices)
+
     list_ref = ft.use_memo(lambda: ft.Ref[ft.ListView](), [])
 
     def scroll_to_target_page():
@@ -32,9 +34,8 @@ def PdfReader(
 
         async def _scroll():
             try:
-                await list_view.scroll_to(offset=target_offset, duration=220)
+                await list_view.scroll_to(offset=target_offset, duration=180)
             except RuntimeError:
-                # Session can be closed while async scroll is in flight.
                 pass
             finally:
                 on_jump_handled()
@@ -58,6 +59,7 @@ def PdfReader(
             expand=True,
             spacing=12,
             item_extent=page_item_extent,
+            scroll=ft.ScrollMode.AUTO,
             on_scroll=handle_vertical_scroll,
             controls=cast(
                 list[ft.Control],
@@ -67,43 +69,55 @@ def PdfReader(
                         alignment=ft.Alignment(0, 0),
                         height=rendered_page_height,
                         content=ft.Image(
-                            src=get_page_base64(i) or "",
+                            src=(
+                                current_src
+                                if i == current_page
+                                else (get_page_base64(i) or "")
+                            ),
                             width=rendered_page_width,
                             height=rendered_page_height,
                         )
-                        if i in visible_indices
-                        else ft.Container(),
+                        if i in render_set
+                        else cast(Any, ft.Container)(
+                            alignment=ft.Alignment(0, 0),
+                            border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                            content=ft.Text(
+                                value=f"Page {i + 1}",
+                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                size=11,
+                            ),
+                        ),
                     )
                     for i in range(page_count)
                 ],
             ),
         )
 
-    return cast(Any, ft.Column)(
+    return cast(Any, ft.ListView)(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
         controls=cast(
             list[ft.Control],
             [
-            cast(Any, ft.Row)(
-                expand=True,
-                scroll=ft.ScrollMode.AUTO,
-                alignment=ft.MainAxisAlignment.CENTER,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-                controls=cast(
-                    list[ft.Control],
-                    [
-                    cast(Any, ft.Container)(
-                        padding=10,
-                        content=ft.Image(
-                            src=current_src,
-                            width=rendered_page_width,
-                            height=rendered_page_height,
-                        ),
-                    )
-                ],
-                ),
-            )
-        ],
+                cast(Any, ft.Row)(
+                    scroll=ft.ScrollMode.AUTO,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    controls=cast(
+                        list[ft.Control],
+                        [
+                            cast(Any, ft.Container)(
+                                padding=10,
+                                content=ft.Image(
+                                    src=current_src or (get_page_base64(current_page) or ""),
+                                    width=rendered_page_width,
+                                    height=rendered_page_height,
+                                ),
+                            )
+                        ],
+                    ),
+                )
+            ],
         ),
     )

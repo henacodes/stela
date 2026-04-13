@@ -6,7 +6,11 @@ from components.library_book_card import LibraryBookCard
 
 
 @ft.component
-def LibraryGrid(books: list[LibraryBook], on_open: Callable[[str], None | Awaitable[None]]):
+def LibraryGrid(
+    books: list[LibraryBook],
+    on_open: Callable[[str], None | Awaitable[None]],
+    on_fetch_cover: Callable[[str], None | Awaitable[None]],
+):
     if not books:
         return ft.Column(
             expand=True,
@@ -29,6 +33,6 @@ def LibraryGrid(books: list[LibraryBook], on_open: Callable[[str], None | Awaita
         child_aspect_ratio=0.6,
         controls=cast(
             list[ft.Control],
-            [LibraryBookCard(book=book, on_open=on_open) for book in books],
+            [LibraryBookCard(book=book, on_open=on_open, on_fetch_cover=on_fetch_cover) for book in books],
         ),
     )

@@ -10,12 +10,14 @@ from views.settings import SettingsView
 
 # Your "Slicky" Graphite Palette
 GRAPHITE = "#18181b"
+DARK_BG = "#111827"
 
 @ft.component
-def App() -> ft.View:
+def App(initial_open_path: str | None = None) -> ft.View:
     # 1. Initialize Global App State
     app, _ = ft.use_state(AppModel(route=ft.context.page.route))
-    seed_color, set_seed_color = ft.use_state(GRAPHITE)
+    seed_color, set_seed_color = ft.use_state(app.theme_seed_color or GRAPHITE)
+    handled_initial_open_ref = ft.use_ref("")
 
     # 2. Synchronize Route Events
     ft.context.page.on_route_change = app.route_change
@@ -26,15 +28,19 @@ def App() -> ft.View:
         lambda: app.toggle_theme(), dependencies=[app.theme_mode]
     )
 
+    def set_seed_color_and_persist(color: str):
+        set_seed_color(color)
+        app.set_theme_seed_color(color)
+
     # 4. Prepare Context Values
     theme_value = ft.use_memo(
         lambda: ThemeContextValue(
             mode=app.theme_mode,
             seed_color=seed_color,      
             toggle_mode=toggle_theme,
-            set_seed_color=set_seed_color, 
+            set_seed_color=set_seed_color_and_persist,
         ),
-        dependencies=[app.theme_mode, toggle_theme, set_seed_color, seed_color],
+        dependencies=[app.theme_mode, toggle_theme, set_seed_color_and_persist, seed_color],
     )
 
     # 5. Side Effect: Update Physical Page Theme
@@ -47,6 +53,16 @@ def App() -> ft.View:
         ft.context.page.update()
 
     ft.on_updated(apply_theme_to_page, [app.theme_mode, seed_color])
+
+    def open_initial_file_if_any():
+        if not initial_open_path:
+            return
+        if handled_initial_open_ref.current == initial_open_path:
+            return
+        handled_initial_open_ref.current = initial_open_path
+        app.open_external_book(initial_open_path)
+
+    ft.on_updated(open_initial_file_if_any, [initial_open_path, app.route])
 
     def shell_content() -> ft.Control:
         if app.route == "/reader":
@@ -71,7 +87,7 @@ def App() -> ft.View:
             lambda: ft.View(
                 route=app.route, # Keep this synced
                 padding=0,
-                bgcolor=ft.Colors.SURFACE if app.theme_mode == ft.ThemeMode.LIGHT else "#09090b",
+                bgcolor=ft.Colors.SURFACE if app.theme_mode == ft.ThemeMode.LIGHT else DARK_BG,
                 controls=[
                     shell_content()
                 ],

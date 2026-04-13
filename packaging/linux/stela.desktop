@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Stela
+Comment=The Ebook reader she told you not to worry about
+Exec=stela %F
+Icon=stela
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;application/epub+zip;
+StartupNotify=true
