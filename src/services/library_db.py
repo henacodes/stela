@@ -225,6 +225,19 @@ class LibraryDB:
                 (path,),
             )
 
+    def has_book(self, path: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM books
+                WHERE path = ? AND deleted_at IS NULL
+                LIMIT 1
+                """,
+                (path,),
+            ).fetchone()
+        return row is not None
+
     def import_paths(
         self,
         paths: Iterable[str],
@@ -255,6 +268,35 @@ class LibraryDB:
             return True
         except Exception:
             return False
+
+    def upsert_external_placeholder(self, path: str) -> bool:
+        p = Path(path).expanduser()
+        if not p.exists() or not p.is_file():
+            return False
+
+        suffix = p.suffix.lower()
+        if suffix not in {".pdf", ".epub"}:
+            return False
+
+        fmt = "pdf" if suffix == ".pdf" else "epub"
+        title = p.stem
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO books (
+                    path, format, title, author, language, publisher, identifier, description,
+                    total_units, estimated_word_count, deleted_at, updated_at
+                ) VALUES (?, ?, ?, '', '', '', '', '', 0, 0, NULL, CURRENT_TIMESTAMP)
+                ON CONFLICT(path) DO UPDATE SET
+                    format=excluded.format,
+                    title=CASE WHEN books.title = '' THEN excluded.title ELSE books.title END,
+                    deleted_at=NULL,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (str(p), fmt, title),
+            )
+        return True
 
     def refresh_cover_for_book(self, path: str) -> bool:
         with self._connect() as conn:

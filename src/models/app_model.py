@@ -74,14 +74,21 @@ class AppModel:
         self.theme_seed_color = _as_str(settings.get("seed_color"), "#18181b")
         self.refresh_library()
 
+    def _safe_page(self):
+        try:
+            return ft.context.page
+        except RuntimeError:
+            return None
+
     def navigate(self, new_route: str):
         """Standard navigation handler."""
         self.route = new_route
         if new_route != "/reader":
             self.opening_book_path = None
-        if ft.context.page:
-            ft.context.page.route = new_route
-            ft.context.page.update()
+        page = self._safe_page()
+        if page:
+            page.route = new_route
+            page.update()
 
     def route_change(self, e: ft.RouteChangeEvent):
         """Syncs the model when the browser/system route changes."""
@@ -131,8 +138,9 @@ class AppModel:
             self.import_done = done
             self.import_total = total
             self.import_current_book = path.split("/")[-1]
-            if ft.context.page:
-                ft.context.page.update()
+            page = self._safe_page()
+            if page:
+                page.update()
 
         imported, failed = self._library_db.import_paths(filtered_paths, progress_callback=on_progress)
         self.refresh_library()
@@ -155,8 +163,9 @@ class AppModel:
         for i, path in enumerate(filtered_paths, start=1):
             self.import_done = i
             self.import_current_book = path.split("/")[-1]
-            if ft.context.page:
-                ft.context.page.update()
+            page = self._safe_page()
+            if page:
+                page.update()
 
             ok = await asyncio.to_thread(self._library_db.import_path, path)
             if ok:
@@ -182,8 +191,9 @@ class AppModel:
             self.import_done = done
             self.import_total = total
             self.import_current_book = path.split("/")[-1]
-            if ft.context.page:
-                ft.context.page.update()
+            page = self._safe_page()
+            if page:
+                page.update()
 
         imported, failed = self._library_db.import_folder(folder_path, progress_callback=on_progress)
         self.refresh_library()
@@ -210,8 +220,9 @@ class AppModel:
     def open_book(self, path: str):
         """Selects a book and moves to the reader view."""
         self.opening_book_path = path
-        if ft.context.page:
-            ft.context.page.update()
+        page = self._safe_page()
+        if page:
+            page.update()
         self.selected_book = path
         self._library_db.mark_opened(path)
         session = self._library_db.get_reader_session()
@@ -298,10 +309,11 @@ class AppModel:
             self.import_status = "File not found"
             return False
 
-        ok = self._library_db.import_path(resolved)
-        if not ok:
-            self.import_status = "Could not import selected file"
-            return False
+        if not self._library_db.has_book(resolved):
+            ok = self._library_db.upsert_external_placeholder(resolved)
+            if not ok:
+                self.import_status = "Could not import selected file"
+                return False
 
         self.refresh_library()
         self.open_book(resolved)
