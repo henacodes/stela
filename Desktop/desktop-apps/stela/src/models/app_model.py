@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 import flet as ft
-import asyncio
 
 @ft.observable
 @dataclass
@@ -15,7 +14,8 @@ class AppModel:
         """Standard navigation handler."""
         self.route = new_route
         if ft.context.page:
-            asyncio.create_task(ft.context.page.push_route(new_route))
+            ft.context.page.route = new_route
+            ft.context.page.update()
 
     def route_change(self, e: ft.RouteChangeEvent):
         """Syncs the model when the browser/system route changes."""
@@ -34,9 +34,9 @@ class AppModel:
         )
 
     def import_book(self, path: str):
-        """Adds a new PDF path to the library."""
+        """Adds a new book path (PDF or EPUB) to the library."""
         if path and path not in self.library:
-            self.library.append(path)
+            self.library = [*self.library, path]
 
     def open_book(self, path: str):
         """Selects a book and moves to the reader view."""

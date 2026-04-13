@@ -4,23 +4,14 @@ version = "0.1.0"
 description = ""
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [
-    { name = "Flet developer", email = "you@example.com" }
-]
-dependencies = [
-    "flet>=0.84.0",
-    "pymupdf>=1.27.2.2",
-]
+authors = [{ name = "Flet developer", email = "you@example.com" }]
+dependencies = ["flet>=0.84.0", "pymupdf>=1.27.2.2"]
 
 [dependency-groups]
-dev = [
-    "flet-cli>=0.84.0",
-    "flet-desktop>=0.84.0",
-    "flet-web>=0.84.0",
-]
+dev = ["flet-cli>=0.84.0", "flet-desktop>=0.84.0", "flet-web>=0.84.0"]
 
 [tool.flet]
-desktop_flavor = "light"    # Change to "full" to use flet-audio and flet-video
+desktop_flavor = "light"                      # Change to "full" to use flet-audio and flet-video
 org = "com.mycompany"
 product = "stela"
 company = "Flet"

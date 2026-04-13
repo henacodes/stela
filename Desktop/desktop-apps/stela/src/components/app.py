@@ -50,10 +50,10 @@ def App() -> ft.View:
         app,
         lambda: ThemeContext(
             theme_value,
+            # We wrap the View logic in a lambda so it re-executes when 'app' changes
             lambda: ft.View(
-                route="/",
+                route=app.route, # Keep this synced
                 padding=30,
-                # Use a dynamic background color for that slick look
                 bgcolor=ft.Colors.SURFACE if app.theme_mode == ft.ThemeMode.LIGHT else "#09090b",
                 controls=[
                     LibraryView() if app.route == "/" else ReaderView()
